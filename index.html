@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <title>Claim Rewards (Rabby kompatibilní)</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+</head>
+<body style="font-family: sans-serif; padding: 2rem;">
+  <h2>Claim Rewards (Avalanche C-Chain)</h2>
+
+  <button id="connect">🔌 Připojit peněženku (Rabby / MetaMask)</button>
+  <button id="claim" disabled>🏆 Claim Rewards</button>
+
+  <pre id="log" style="background: #f5f5f5; padding: 1rem; margin-top: 1rem;"></pre>
+
+  <script>
+    const log = (msg) => {
+      const pre = document.getElementById("log");
+      pre.textContent += msg + "\n";
+      pre.scrollTop = pre.scrollHeight;
+    };
+
+    const contractAddress = "0xaaaf3d9cdd3602d117c67d80eec37a160c8d9869";
+
+    const abi = [
+      {
+        "inputs": [
+          { "internalType": "address[]", "name": "_gauges", "type": "address[]" },
+          { "internalType": "address[][]", "name": "_tokens", "type": "address[][]" }
+        ],
+        "name": "claimRewards",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      }
+    ];
+
+    let signer, contract;
+
+    document.getElementById("connect").onclick = async () => {
+      if (typeof window.ethereum === "undefined") {
+        alert("⚠️ Peněženka (např. Rabby nebo MetaMask) nebyla detekována.");
+        return;
+      }
+
+      try {
+        await window.ethereum.request({ method: "eth_requestAccounts" });
+
+        const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
+        signer = provider.getSigner();
+        const network = await provider.getNetwork();
+
+        log(`🌐 Připojeno k síti: ${network.name} (chainId: ${network.chainId})`);
+
+        if (network.chainId !== 43114) {
+          alert("⚠️ Nepřipojeno k Avalanche C-Chain (Mainnet). Přepni síť v Rabby.");
+          return;
+        }
+
+        contract = new ethers.Contract(contractAddress, abi, signer);
+        document.getElementById("claim").disabled = false;
+        log("✅ Peněženka připojena. Můžeš claimnout rewards.");
+      } catch (err) {
+        console.error(err);
+        log("❌ Chyba při připojení: " + err.message);
+      }
+    };
+
+    document.getElementById("claim").onclick = async () => {
+      try {
+        const gauges = [
+          "0xDB371e944065bB2773A7DF0B0Ed1e828b52F0ca8"
+        ];
+
+        const tokens = [
+          [
+            "0xAAAB9D12A30504559b0C5a9A5977fEE4A6081c6b",
+            "0xd5d0A9b3f2C264b955Ae7161cfA6D38A7aEa60a7"
+          ]
+        ];
+
+        log("📤 Odesílám transakci...");
+        const tx = await contract.claimRewards(gauges, tokens);
+        log(`⏳ Čekám na potvrzení... TX hash: ${tx.hash}`);
+
+        const receipt = await tx.wait();
+        log(`✅ Transakce potvrzena! TX: ${receipt.transactionHash}`);
+      } catch (err) {
+        console.error(err);
+        log(`❌ Chyba při volání contractu: ${err.message}`);
+      }
+    };
+  </script>
+</body>
+</html>
