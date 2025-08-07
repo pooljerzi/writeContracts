@@ -1,94 +1,151 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="cs">
 <head>
-  <meta charset="UTF-8">
-  <title>Claim Rewards (Rabby kompatibilní)</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Withdraw Profit – BSC helper</title>
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;}
+    h1{font-size:1.4rem;margin:0 0 12px}
+    .card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    label{font-weight:600;display:block;margin:10px 0 6px}
+    input{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px}
+    button{cursor:pointer;border:0;border-radius:10px;padding:10px 14px;font-weight:700}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .primary{background:#111827;color:#fff}
+    .secondary{background:#e5e7eb}
+    .log{white-space:pre-wrap;background:#0b1020;color:#e5e7eb;border-radius:10px;padding:12px;min-height:80px}
+    .ok{color:#16a34a}
+    .err{color:#dc2626}
+    small{color:#6b7280}
+  </style>
 </head>
-<body style="font-family: sans-serif; padding: 2rem;">
-  <h2>Claim Rewards (Avalanche C-Chain)</h2>
+<body>
+  <h1>Withdraw Profit – BSC Helper</h1>
+  <div class="card">
+    <p>Tahle stránka pošle volání <code>withdrawProfit(uint256 _id)</code> na zadaný kontrakt (proxy). Funguje s Rabby/MetaMask – prohlížeč musí mít <code>window.ethereum</code>.</p>
+  </div>
 
-  <button id="connect">🔌 Připojit peněženku (Rabby / MetaMask)</button>
-  <button id="claim" disabled>🏆 Claim Rewards</button>
+  <div class="card">
+    <div class="row">
+      <button id="btnConnect" class="primary">1) Připojit peněženku</button>
+      <button id="btnCheck" class="secondary">Zkontrolovat síť</button>
+    </div>
+    <small>Po připojení se síť přepne na BNB Chain (mainnet, chainId 56), pokud už tam nejsi.</small>
+  </div>
 
-  <pre id="log" style="background: #f5f5f5; padding: 1rem; margin-top: 1rem;"></pre>
+  <div class="card">
+    <label for="addr">Kontrakt (proxy) adresa</label>
+    <input id="addr" value="0xb3de11d3FE9fFcd788617118a42b1d14E0b055D0" />
 
-  <script>
-    const log = (msg) => {
-      const pre = document.getElementById("log");
-      pre.textContent += msg + "\n";
-      pre.scrollTop = pre.scrollHeight;
-    };
+    <label for="id">Parametr <code>_id</code> (uint256)</label>
+    <input id="id" placeholder="např. 0 nebo 7" />
 
-    const contractAddress = "0xaaaf3d9cdd3602d117c67d80eec37a160c8d9869";
+    <div class="row" style="margin-top:12px">
+      <button id="btnCall" class="primary">2) Zavolat withdrawProfit</button>
+      <button id="btnCalldata" class="secondary">Vygenerovat calldata</button>
+    </div>
+  </div>
 
-    const abi = [
-      {
-        "inputs": [
-          { "internalType": "address[]", "name": "_gauges", "type": "address[]" },
-          { "internalType": "address[][]", "name": "_tokens", "type": "address[][]" }
-        ],
-        "name": "claimRewards",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-      }
-    ];
+  <div class="card">
+    <div class="log" id="log">Připraveno…</div>
+  </div>
 
-    let signer, contract;
+<script>
+(async function(){
+  const log = (msg, cls) => {
+    const el = document.getElementById('log');
+    el.innerHTML += "\n" + (cls?`<span class="${cls}">${msg}</span>`:msg);
+    el.scrollTop = el.scrollHeight;
+  };
 
-    document.getElementById("connect").onclick = async () => {
-      if (typeof window.ethereum === "undefined") {
-        alert("⚠️ Peněženka (např. Rabby nebo MetaMask) nebyla detekována.");
-        return;
-      }
+  const BSC_PARAMS = {
+    chainId: '0x38', // 56
+    chainName: 'BNB Smart Chain',
+    nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+    rpcUrls: ['https://bsc-dataseed.binance.org/'],
+    blockExplorerUrls: ['https://bscscan.com']
+  };
 
+  let provider, signer;
+
+  async function ensureProvider(){
+    if (!window.ethereum) throw new Error('Nenalezeno window.ethereum (nainstaluj Rabby/MetaMask).');
+    provider = new ethers.providers.Web3Provider(window.ethereum);
+    signer = provider.getSigner();
+    return { provider, signer };
+  }
+
+  async function switchToBsc(){
+    const chainId = await provider.send('eth_chainId', []);
+    if (chainId !== BSC_PARAMS.chainId){
       try {
-        await window.ethereum.request({ method: "eth_requestAccounts" });
-
-        const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
-        signer = provider.getSigner();
-        const network = await provider.getNetwork();
-
-        log(`🌐 Připojeno k síti: ${network.name} (chainId: ${network.chainId})`);
-
-        if (network.chainId !== 43114) {
-          alert("⚠️ Nepřipojeno k Avalanche C-Chain (Mainnet). Přepni síť v Rabby.");
-          return;
+        await provider.send('wallet_switchEthereumChain', [{ chainId: BSC_PARAMS.chainId }]);
+        log('Přepnuto na BSC.', 'ok');
+      } catch (e){
+        if (e.code === 4902){
+          await provider.send('wallet_addEthereumChain', [BSC_PARAMS]);
+          log('Síť BSC přidána a přepnuta.', 'ok');
+        } else {
+          throw e;
         }
-
-        contract = new ethers.Contract(contractAddress, abi, signer);
-        document.getElementById("claim").disabled = false;
-        log("✅ Peněženka připojena. Můžeš claimnout rewards.");
-      } catch (err) {
-        console.error(err);
-        log("❌ Chyba při připojení: " + err.message);
       }
-    };
+    } else {
+      log('Už jsi na BSC.', 'ok');
+    }
+  }
 
-    document.getElementById("claim").onclick = async () => {
-      try {
-        const gauges = [
-          "0x79A73c1a2F722695472E853DB82AFBF1D7947D3b"
-        ];
+  function buildCalldata(id){
+    // Bezpečné zakódování přes Interface (méně chyb než ruční padding)
+    const iface = new ethers.utils.Interface(['function withdrawProfit(uint256 _id)']);
+    return iface.encodeFunctionData('withdrawProfit', [ethers.BigNumber.from(id.toString())]);
+  }
 
-        const tokens = [
-          [
-            "0xAAAB9D12A30504559b0C5a9A5977fEE4A6081c6b"
-          ]
-        ];
+  document.getElementById('btnConnect').onclick = async () => {
+    try {
+      await ensureProvider();
+      await provider.send('eth_requestAccounts', []);
+      await switchToBsc();
+      const addr = await signer.getAddress();
+      log('Připojeno: ' + addr, 'ok');
+    } catch (e){ log('Chyba připojení: ' + (e.message||e), 'err'); }
+  };
 
-        log("📤 Odesílám transakci...");
-        const tx = await contract.claimRewards(gauges, tokens);
-        log(`⏳ Čekám na potvrzení... TX hash: ${tx.hash}`);
+  document.getElementById('btnCheck').onclick = async () => {
+    try { await ensureProvider(); await switchToBsc(); } catch(e){ log('Chyba: '+(e.message||e), 'err'); }
+  };
 
-        const receipt = await tx.wait();
-        log(`✅ Transakce potvrzena! TX: ${receipt.transactionHash}`);
-      } catch (err) {
-        console.error(err);
-        log(`❌ Chyba při volání contractu: ${err.message}`);
-      }
-    };
-  </script>
+  document.getElementById('btnCalldata').onclick = () => {
+    try{
+      const id = document.getElementById('id').value.trim();
+      if (id === '') throw new Error('Zadej _id');
+      const data = buildCalldata(id);
+      log('Calldata: ' + data, 'ok');
+    } catch(e){ log('Chyba: '+(e.message||e), 'err'); }
+  };
+
+  document.getElementById('btnCall').onclick = async () => {
+    try{
+      await ensureProvider();
+      await switchToBsc();
+      const to = document.getElementById('addr').value.trim();
+      const id = document.getElementById('id').value.trim();
+      if (!ethers.utils.isAddress(to)) throw new Error('Neplatná adresa kontraktu');
+      if (id === '') throw new Error('Zadej _id');
+      const data = buildCalldata(id);
+
+      log('Odesílám transakci…');
+      const tx = await signer.sendTransaction({ to, data, value: 0 });
+      log('Tx odeslána: ' + tx.hash, 'ok');
+      const r = await tx.wait();
+      log('Potvrzeno v bloku ' + r.blockNumber + '. Tx: https://bscscan.com/tx/' + tx.hash, 'ok');
+    } catch(e){
+      // Rabby i MetaMask dávají různé texty, zobrazíme raw message
+      log('Transakce selhala: ' + (e.data?.message || e.error?.message || e.message || e), 'err');
+    }
+  };
+})();
+</script>
 </body>
 </html>
