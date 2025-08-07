@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Withdraw Profit – BSC helper (v2)</title>
+  <title>Withdraw Profit – BSC helper (v3 debug)</title>
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 16px}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:820px;margin:40px auto;padding:0 16px}
     h1{font-size:1.4rem;margin:0 0 12px}
     .card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
     label{font-weight:600;display:block;margin:10px 0 6px}
@@ -15,16 +15,18 @@
     .row{display:flex;gap:8px;flex-wrap:wrap}
     .primary{background:#111827;color:#fff}
     .secondary{background:#e5e7eb}
-    .log{white-space:pre-wrap;background:#0b1020;color:#e5e7eb;border-radius:10px;padding:12px;min-height:80px}
+    .log{white-space:pre-wrap;background:#0b1020;color:#e5e7eb;border-radius:10px;padding:12px;min-height:100px}
     .ok{color:#16a34a}
     .err{color:#dc2626}
     small{color:#6b7280}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
   </style>
 </head>
 <body>
-  <h1>Withdraw Profit – BSC Helper (v2)</h1>
+  <h1>Withdraw Profit – BSC Helper (v3 debug)</h1>
+
   <div class="card">
-    <p>Tahle stránka pošle volání <code>withdrawProfit(uint256 _id)</code> na zadaný kontrakt (proxy). Funguje s Rabby/MetaMask – prohlížeč musí mít <code>window.ethereum</code>.</p>
+    <p>Tahle stránka volá <code>withdrawProfit(uint256 _id)</code> na zadaný kontrakt. Přidal jsem diagnostiku adresy, aby bylo vidět, proč validace padá. Funguje s Rabby/MetaMask (musí existovat <code>window.ethereum</code>).</p>
   </div>
 
   <div class="card">
@@ -32,12 +34,17 @@
       <button id="btnConnect" class="primary">1) Připojit peněženku</button>
       <button id="btnCheck" class="secondary">Zkontrolovat síť</button>
     </div>
-    <small>Po připojení se síť přepne na BNB Chain (mainnet, chainId 56), pokud už tam nejsi.</small>
+    <small>Po připojení se síť přepne na BNB Chain (chainId 56), pokud už tam nejsi.</small>
   </div>
 
   <div class="card">
     <label for="addr">Kontrakt (proxy) adresa</label>
     <input id="addr" value="0xb3de11d3FE9fFcd788617118a42b1d14E0b055D0" />
+    <div class="row" style="align-items:center;margin-top:8px">
+      <button id="btnValidate" class="secondary">Validovat adresu</button>
+      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="bypass"/> By‑pass validace adresy</label>
+    </div>
+    <div id="diag" class="mono" style="margin-top:8px;font-size:12px;white-space:pre-wrap"></div>
 
     <label for="id">Parametr <code>_id</code> (uint256)</label>
     <input id="id" placeholder="např. 0 nebo 7" />
@@ -61,7 +68,7 @@
   };
 
   const BSC_PARAMS = {
-    chainId: '0x38', // 56
+    chainId: '0x38',
     chainName: 'BNB Smart Chain',
     nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
     rpcUrls: ['https://bsc-dataseed.binance.org/'],
@@ -80,29 +87,34 @@
   async function switchToBsc(){
     const chainId = await provider.send('eth_chainId', []);
     if (chainId !== BSC_PARAMS.chainId){
-      try {
-        await provider.send('wallet_switchEthereumChain', [{ chainId: BSC_PARAMS.chainId }]);
-        log('Přepnuto na BSC.', 'ok');
-      } catch (e){
-        if (e.code === 4902){
-          await provider.send('wallet_addEthereumChain', [BSC_PARAMS]);
-          log('Síť BSC přidána a přepnuta.', 'ok');
-        } else {
-          throw e;
-        }
-      }
-    } else {
-      log('Už jsi na BSC.', 'ok');
-    }
+      try { await provider.send('wallet_switchEthereumChain', [{ chainId: BSC_PARAMS.chainId }]); log('Přepnuto na BSC.', 'ok'); }
+      catch (e){ if (e.code === 4902){ await provider.send('wallet_addEthereumChain', [BSC_PARAMS]); log('Síť BSC přidána a přepnuta.', 'ok'); } else { throw e; } }
+    } else { log('Už jsi na BSC.', 'ok'); }
   }
 
   function sanitizeAddress(input){
-    // Vyhoď neviditelné znaky + všechny whitespace
-    let s = (input||'').toString().replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, '');
-    // Pokud někdo vložil zkrácený tvar s "...", odmítneme
-    if (s.includes('...')) throw new Error('Adresa je zkrácená (…); vlož plných 42 znaků.');
-    // Normalizuj na checksum – vyhodí chybu, pokud to není validní 20B adresa
-    return ethers.utils.getAddress(s);
+    let raw = (input||'').toString();
+    let stripped = raw.replace(/[\u200B-\u200D\uFEFF\u00A0\t\n\r]/g, '').replace(/\s+/g, '');
+    return { raw, stripped };
+  }
+
+  function diagAddress(){
+    const input = document.getElementById('addr').value;
+    const { raw, stripped } = sanitizeAddress(input);
+    let diag = [];
+    diag.push('RAW:    ' + JSON.stringify(raw));
+    diag.push('RAW len:' + raw.length);
+    diag.push('RAW codes:' + Array.from(raw).map(c=>c.charCodeAt(0)).join(','));
+    diag.push('---');
+    diag.push('STRIP:  ' + JSON.stringify(stripped));
+    diag.push('STR len:' + stripped.length);
+    diag.push('STR codes:' + Array.from(stripped).map(c=>c.charCodeAt(0)).join(','));
+    let valid=false, checksummed='';
+    try { checksummed = ethers.utils.getAddress(stripped); valid = true; }
+    catch(e){ /* ignore */ }
+    diag.push('isAddress: ' + valid + (valid? (' | checksum: ' + checksummed):''));
+    document.getElementById('diag').textContent = diag.join('\n');
+    return { stripped, valid, checksummed };
   }
 
   function buildCalldata(id){
@@ -110,40 +122,32 @@
     return iface.encodeFunctionData('withdrawProfit', [ethers.BigNumber.from(id.toString())]);
   }
 
+  document.getElementById('btnValidate').onclick = () => { try{ diagAddress(); } catch(e){ log('Diag chyba: '+(e.message||e), 'err'); } };
+
   document.getElementById('btnConnect').onclick = async () => {
-    try {
-      await ensureProvider();
-      await provider.send('eth_requestAccounts', []);
-      await switchToBsc();
-      const addr = await signer.getAddress();
-      log('Připojeno: ' + addr, 'ok');
-    } catch (e){ log('Chyba připojení: ' + (e.message||e), 'err'); }
+    try { await ensureProvider(); await provider.send('eth_requestAccounts', []); await switchToBsc(); const addr = await signer.getAddress(); log('Připojeno: ' + addr, 'ok'); }
+    catch (e){ log('Chyba připojení: ' + (e.message||e), 'err'); }
   };
 
-  document.getElementById('btnCheck').onclick = async () => {
-    try { await ensureProvider(); await switchToBsc(); } catch(e){ log('Chyba: '+(e.message||e), 'err'); }
-  };
+  document.getElementById('btnCheck').onclick = async () => { try { await ensureProvider(); await switchToBsc(); } catch(e){ log('Chyba: '+(e.message||e), 'err'); } };
 
   document.getElementById('btnCalldata').onclick = () => {
-    try{
-      const id = document.getElementById('id').value.trim();
-      if (id === '') throw new Error('Zadej _id');
-      const data = buildCalldata(id);
-      log('Calldata: ' + data, 'ok');
-    } catch(e){ log('Chyba: '+(e.message||e), 'err'); }
+    try{ const id = document.getElementById('id').value.trim(); if (id === '') throw new Error('Zadej _id'); const data = buildCalldata(id); log('Calldata: ' + data, 'ok'); }
+    catch(e){ log('Chyba: '+(e.message||e), 'err'); }
   };
 
   document.getElementById('btnCall').onclick = async () => {
     try{
       await ensureProvider();
       await switchToBsc();
-      let toRaw = document.getElementById('addr').value;
       const id = document.getElementById('id').value.trim();
-      const to = sanitizeAddress(toRaw);
       if (id === '') throw new Error('Zadej _id');
+      const { stripped, valid, checksummed } = diagAddress();
+      const bypass = document.getElementById('bypass').checked;
+      if (!valid && !bypass) throw new Error('Neplatná adresa – oprav ji nebo zaškrtni By‑pass.');
+      const to = valid ? checksummed : stripped; // necháme uživatele bypassnout
       const data = buildCalldata(id);
-
-      log('Odesílám transakci…');
+      log('Odesílám transakci… to=' + to);
       const tx = await signer.sendTransaction({ to, data, value: 0 });
       log('Tx odeslána: ' + tx.hash, 'ok');
       const r = await tx.wait();
