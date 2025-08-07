@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Withdraw Profit – BSC helper</title>
+  <title>Withdraw Profit – BSC helper (v2)</title>
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 16px}
     h1{font-size:1.4rem;margin:0 0 12px}
     .card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
     label{font-weight:600;display:block;margin:10px 0 6px}
@@ -22,7 +22,7 @@
   </style>
 </head>
 <body>
-  <h1>Withdraw Profit – BSC Helper</h1>
+  <h1>Withdraw Profit – BSC Helper (v2)</h1>
   <div class="card">
     <p>Tahle stránka pošle volání <code>withdrawProfit(uint256 _id)</code> na zadaný kontrakt (proxy). Funguje s Rabby/MetaMask – prohlížeč musí mít <code>window.ethereum</code>.</p>
   </div>
@@ -96,8 +96,16 @@
     }
   }
 
+  function sanitizeAddress(input){
+    // Vyhoď neviditelné znaky + všechny whitespace
+    let s = (input||'').toString().replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, '');
+    // Pokud někdo vložil zkrácený tvar s "...", odmítneme
+    if (s.includes('...')) throw new Error('Adresa je zkrácená (…); vlož plných 42 znaků.');
+    // Normalizuj na checksum – vyhodí chybu, pokud to není validní 20B adresa
+    return ethers.utils.getAddress(s);
+  }
+
   function buildCalldata(id){
-    // Bezpečné zakódování přes Interface (méně chyb než ruční padding)
     const iface = new ethers.utils.Interface(['function withdrawProfit(uint256 _id)']);
     return iface.encodeFunctionData('withdrawProfit', [ethers.BigNumber.from(id.toString())]);
   }
@@ -129,9 +137,9 @@
     try{
       await ensureProvider();
       await switchToBsc();
-      const to = document.getElementById('addr').value.trim();
+      let toRaw = document.getElementById('addr').value;
       const id = document.getElementById('id').value.trim();
-      if (!ethers.utils.isAddress(to)) throw new Error('Neplatná adresa kontraktu');
+      const to = sanitizeAddress(toRaw);
       if (id === '') throw new Error('Zadej _id');
       const data = buildCalldata(id);
 
@@ -141,7 +149,6 @@
       const r = await tx.wait();
       log('Potvrzeno v bloku ' + r.blockNumber + '. Tx: https://bscscan.com/tx/' + tx.hash, 'ok');
     } catch(e){
-      // Rabby i MetaMask dávají různé texty, zobrazíme raw message
       log('Transakce selhala: ' + (e.data?.message || e.error?.message || e.message || e), 'err');
     }
   };
